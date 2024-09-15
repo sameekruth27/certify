@@ -78,7 +78,7 @@ async def generate_certificates(
 
     def overlay_qr_code(certificate, text, qr_code, text_position, qr_position, output_filename):
         draw = ImageDraw.Draw(certificate)
-        font_path = os.path.join(base_dir, 'static', 'fonts', 'baskervi.ttf')  # Path to the font
+        font_path = os.path.join(base_dir, 'static/data', 'fonts', 'baskervi.ttf')  # Path to the font
         font = ImageFont.truetype(font_path, 90)
         text_width = font.getlength(text)
         text_x = text_position[0] - text_width // 2
