@@ -1,8 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List
-from qr_code_generator import generate_qr_code, overlay_qr_code
+from pydantic import BaseModel
 from PIL import Image
 import pandas as pd
 import os
@@ -14,7 +12,7 @@ app = FastAPI()
 # CORS configuration (adjust for production as needed)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:3000"],  # Adjust this to your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,37 +24,40 @@ def read_root():
     return {"message": "Welcome to the Certificate Generation API"}
 
 # Model for the certificate details
-class CertificateRequest(BaseModel):
-    holder_name: str
-    department: str
-    code: str
-
 class CertificateResponse(BaseModel):
     message: str
     certificate_url: str
 
-# POST method to upload the Excel file and generate certificates
+# POST method to upload the CSV file and generate certificates
 @app.post("/generate/")
-async def generate_certificates(file: UploadFile = File(...)):
+async def generate_certificates(
+    file: UploadFile = File(...),
+    certificate_template: UploadFile = File(...),
+    base_link: str = Form(...)
+):
     try:
         # Check file type
-        if file.content_type != 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
-            raise HTTPException(status_code=400, detail="Invalid file type. Please upload an Excel file.")
+        if file.content_type != 'text/csv':
+            raise HTTPException(status_code=400, detail="Invalid file type. Please upload a CSV file.")
 
-        # Save file locally
+        # Save files locally
         file_location = f"uploaded_files/{file.filename}"
         with open(file_location, "wb+") as file_object:
             file_object.write(file.file.read())
 
-        # Read the Excel file
-        df = pd.read_excel(file_location)
+        template_location = f"uploaded_files/{certificate_template.filename}"
+        with open(template_location, "wb+") as file_object:
+            file_object.write(certificate_template.file.read())
 
-        base_url = "https://yourfrontend.com/certificates/"
-        template_filename = "templates/certificate_template.png"
+        # Read the CSV file
+        df = pd.read_csv(file_location)
+
+        base_url = base_link
+        template_filename = template_location
         output_directory = "static/generated_certificates/"
         os.makedirs(output_directory, exist_ok=True)
 
-        certificate_template = Image.open(template_filename)
+        certificate_template_img = Image.open(template_filename)
         codes_start_number = 1000
 
         all_certificates_data = []
@@ -70,12 +71,14 @@ async def generate_certificates(file: UploadFile = File(...)):
             # QR code generation
             qr_data = base_url + code
             qr_filename = "static/qrcodes/" + f"{fname}_qr.png"
+            # Implement generate_qr_code function in your qr_code_generator module
             generate_qr_code(qr_data, qr_filename)
             qr_code = Image.open(qr_filename)
 
             overlay_text = fname
             output_filename = os.path.join(output_directory, f"{fname}.png")
-            overlay_qr_code(certificate_template.copy(), overlay_text, qr_code, output_filename)
+            # Implement overlay_qr_code function in your qr_code_generator module
+            overlay_qr_code(certificate_template_img.copy(), overlay_text, qr_code, output_filename)
 
             certificate_data = {
                 "name": name,

@@ -19,7 +19,7 @@ import {
 } from '@chakra-ui/react';
 import { useDropzone } from 'react-dropzone';
 import Papa from 'papaparse';
-import axios from 'axios';  // Added axios for HTTP requests
+import axios from 'axios';
 
 const GeneratePage = () => {
   const [file, setFile] = useState(null);
@@ -36,7 +36,7 @@ const GeneratePage = () => {
       setFile(file);
       Papa.parse(file, {
         complete: (results) => {
-          const previewData = results.data.slice(0, 4); // Get the first 4 rows
+          const previewData = results.data.slice(0, 4);
           setData(results.data);
           setCsvPreview(previewData);
         },
@@ -47,11 +47,11 @@ const GeneratePage = () => {
 
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
-    setCertificateImage(file);  // Storing the actual file
+    setCertificateImage(file);
   };
 
   const handleGenerateCertificates = async () => {
-    if (!data.length || !certificateImage || !linkText) {
+    if (!file || !certificateImage || !linkText) {
       toast({
         title: 'Error',
         description: 'Please provide all inputs',
@@ -63,9 +63,9 @@ const GeneratePage = () => {
     }
 
     const formData = new FormData();
-    formData.append('file', file);  // The Excel CSV file
-    formData.append('certificate_template', certificateImage);  // The certificate design image
-    formData.append('base_link', linkText);  // The base link for the QR codes
+    formData.append('file', file);  // CSV file
+    formData.append('certificate_template', certificateImage);  // Certificate image
+    formData.append('base_link', linkText);  // Base URL
 
     try {
       const response = await axios.post('http://localhost:8000/generate/', formData, {
@@ -82,9 +82,7 @@ const GeneratePage = () => {
         isClosable: true,
       });
 
-      // Optionally handle the response or show the generated data
       console.log('Generated certificates:', response.data);
-
     } catch (error) {
       console.error('Error generating certificates:', error);
       toast({
@@ -104,7 +102,7 @@ const GeneratePage = () => {
 
         {/* File Upload */}
         <FormControl>
-          <FormLabel htmlFor="file-upload">Upload Excel File (CSV format)</FormLabel>
+          <FormLabel htmlFor="file-upload">Upload CSV File</FormLabel>
           <Box {...getRootProps()} borderWidth={2} borderStyle="dashed" borderColor="gray.300" p={4} borderRadius="md" textAlign="center">
             <Input {...getInputProps()} id="file-upload" />
             <Text mt={2}>Drag & drop a file here, or click to select one</Text>
@@ -155,13 +153,13 @@ const GeneratePage = () => {
           </Box>
         )}
 
-        {/* Base Link Text */}
+        {/* Base URL */}
         <FormControl>
-          <FormLabel htmlFor="link-text">Base Link</FormLabel>
+          <FormLabel htmlFor="link-text">Base URL for QR Codes</FormLabel>
           <Input
             id="link-text"
             type="text"
-            placeholder="Enter base link"
+            placeholder="Enter base URL"
             value={linkText}
             onChange={(e) => setLinkText(e.target.value)}
           />
