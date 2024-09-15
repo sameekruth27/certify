@@ -1,60 +1,34 @@
 import React, { useState } from 'react';
-import {
-  Container,
-  Text,
-  VStack,
-  Box,
-  Button,
-  Input,
-  FormControl,
-  FormLabel,
-  useToast,
-  Image,
-  Table,
-  Thead,
-  Tbody,
-  Tr,
-  Th,
-  Td,
-} from '@chakra-ui/react';
-import { useDropzone } from 'react-dropzone';
-import Papa from 'papaparse';
 import axios from 'axios';
+import { Container, VStack, Box, Button, Input, FormControl, FormLabel, useToast } from '@chakra-ui/react';
+import { useDropzone } from 'react-dropzone';
 
 const GeneratePage = () => {
-  const [file, setFile] = useState(null);
-  const [certificateImage, setCertificateImage] = useState(null);
-  const [linkText, setLinkText] = useState('');
-  const [data, setData] = useState([]);
-  const [csvPreview, setCsvPreview] = useState([]);
+  const [template, setTemplate] = useState(null);
+  const [excel, setExcel] = useState(null);
+  const [baseUrl, setBaseUrl] = useState('');
+  const [outputDirectory, setOutputDirectory] = useState('static/generated_certificates');
+  const [codeSerial, setCodeSerial] = useState('');
+  const [codesStartNumber, setCodesStartNumber] = useState(1000);
+  const [jsonFileName, setJsonFileName] = useState('Data.json');
+  const [jsonDirectory, setJsonDirectory] = useState('static');
   const toast = useToast();
 
-  const { getRootProps, getInputProps } = useDropzone({
-    accept: '.csv',
-    onDrop: (acceptedFiles) => {
-      const file = acceptedFiles[0];
-      setFile(file);
-      Papa.parse(file, {
-        complete: (results) => {
-          const previewData = results.data.slice(0, 4);
-          setData(results.data);
-          setCsvPreview(previewData);
-        },
-        header: true,
-      });
-    },
+  const { getRootProps: getTemplateProps, getInputProps: getTemplateInputProps } = useDropzone({
+    accept: '.png',
+    onDrop: (acceptedFiles) => setTemplate(acceptedFiles[0]),
   });
 
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    setCertificateImage(file);
-  };
+  const { getRootProps: getExcelProps, getInputProps: getExcelInputProps } = useDropzone({
+    accept: '.xlsx',
+    onDrop: (acceptedFiles) => setExcel(acceptedFiles[0]),
+  });
 
-  const handleGenerateCertificates = async () => {
-    if (!file || !certificateImage || !linkText) {
+  const handleGenerate = async () => {
+    if (!template || !excel || !baseUrl) {
       toast({
         title: 'Error',
-        description: 'Please provide all inputs',
+        description: 'Please provide all inputs.',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -63,12 +37,17 @@ const GeneratePage = () => {
     }
 
     const formData = new FormData();
-    formData.append('file', file);  // CSV file
-    formData.append('certificate_template', certificateImage);  // Certificate image
-    formData.append('base_link', linkText);  // Base URL
+    formData.append('template', template);
+    formData.append('excel', excel);
+    formData.append('base_url', baseUrl);
+    formData.append('output_directory', outputDirectory);
+    formData.append('code_serial', codeSerial);
+    formData.append('codes_start_number', codesStartNumber);
+    formData.append('json_file_name', jsonFileName);
+    formData.append('json_directory', jsonDirectory);
 
     try {
-      const response = await axios.post('http://localhost:8000/generate/', formData, {
+      const response = await axios.post('http://localhost:8000/api/generate-certificates', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -76,18 +55,15 @@ const GeneratePage = () => {
 
       toast({
         title: 'Success',
-        description: 'Certificates have been generated successfully.',
+        description: response.data.message,
         status: 'success',
         duration: 3000,
         isClosable: true,
       });
-
-      console.log('Generated certificates:', response.data);
     } catch (error) {
-      console.error('Error generating certificates:', error);
       toast({
         title: 'Error',
-        description: 'There was an error generating certificates.',
+        description: 'Error generating certificates.',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -98,81 +74,53 @@ const GeneratePage = () => {
   return (
     <Container maxW="container.md" py={12}>
       <VStack spacing={8} align="flex-start">
-        <Text fontSize="2xl" fontWeight="bold">Generate Certificates</Text>
-
-        {/* File Upload */}
         <FormControl>
-          <FormLabel htmlFor="file-upload">Upload CSV File</FormLabel>
-          <Box {...getRootProps()} borderWidth={2} borderStyle="dashed" borderColor="gray.300" p={4} borderRadius="md" textAlign="center">
-            <Input {...getInputProps()} id="file-upload" />
-            <Text mt={2}>Drag & drop a file here, or click to select one</Text>
+          <FormLabel>Upload Certificate Template</FormLabel>
+          <Box {...getTemplateProps()} borderWidth={2} borderStyle="dashed" borderColor="gray.300" p={4} borderRadius="md" textAlign="center">
+            <Input {...getTemplateInputProps()} />
+            <p>Drag & drop a PNG file here, or click to select one</p>
           </Box>
         </FormControl>
 
-        {/* CSV Preview */}
-        {csvPreview.length > 0 && (
-          <Box mt={6} width="100%">
-            <Text fontSize="lg" mb={2}>CSV Preview:</Text>
-            <Table variant="simple">
-              <Thead>
-                <Tr>
-                  {Object.keys(csvPreview[0] || {}).map((key) => (
-                    <Th key={key}>{key}</Th>
-                  ))}
-                </Tr>
-              </Thead>
-              <Tbody>
-                {csvPreview.map((row, index) => (
-                  <Tr key={index}>
-                    {Object.values(row).map((value, i) => (
-                      <Td key={i}>{value}</Td>
-                    ))}
-                  </Tr>
-                ))}
-              </Tbody>
-            </Table>
-          </Box>
-        )}
-
-        {/* Certificate Image Upload */}
         <FormControl>
-          <FormLabel htmlFor="image-upload">Upload Certificate Design Image</FormLabel>
-          <Input
-            id="image-upload"
-            type="file"
-            accept="image/png, image/jpeg"
-            onChange={handleImageUpload}
-          />
+          <FormLabel>Upload Excel File</FormLabel>
+          <Box {...getExcelProps()} borderWidth={2} borderStyle="dashed" borderColor="gray.300" p={4} borderRadius="md" textAlign="center">
+            <Input {...getExcelInputProps()} />
+            <p>Drag & drop an Excel file here, or click to select one</p>
+          </Box>
         </FormControl>
 
-        {/* Certificate Design Image Preview */}
-        {certificateImage && (
-          <Box>
-            <Text fontSize="lg" mb={2}>Certificate Design Preview:</Text>
-            <Image src={URL.createObjectURL(certificateImage)} alt="Certificate Design" maxW="100%" borderRadius="md" />
-          </Box>
-        )}
-
-        {/* Base URL */}
         <FormControl>
-          <FormLabel htmlFor="link-text">Base URL for QR Codes</FormLabel>
-          <Input
-            id="link-text"
-            type="text"
-            placeholder="Enter base URL"
-            value={linkText}
-            onChange={(e) => setLinkText(e.target.value)}
-          />
+          <FormLabel>Base URL</FormLabel>
+          <Input type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="Enter base URL for QR codes" />
         </FormControl>
 
-        {/* Generate Button */}
-        <Button
-          colorScheme="blue"
-          onClick={handleGenerateCertificates}
-          isDisabled={!file || !certificateImage || !linkText}
-        >
-          Generate Certificates
-        </Button>
+        <FormControl>
+          <FormLabel>Output Directory</FormLabel>
+          <Input type="text" value={outputDirectory} onChange={(e) => setOutputDirectory(e.target.value)} placeholder="Enter output directory" />
+        </FormControl>
+
+        <FormControl>
+          <FormLabel>Code Serial</FormLabel>
+          <Input type="text" value={codeSerial} onChange={(e) => setCodeSerial(e.target.value)} placeholder="Enter code serial" />
+        </FormControl>
+
+        <FormControl>
+          <FormLabel>Codes Start Number</FormLabel>
+          <Input type="number" value={codesStartNumber} onChange={(e) => setCodesStartNumber(Number(e.target.value))} placeholder="Enter starting number" />
+        </FormControl>
+
+        <FormControl>
+          <FormLabel>JSON File Name</FormLabel>
+          <Input type="text" value={jsonFileName} onChange={(e) => setJsonFileName(e.target.value)} placeholder="Enter JSON file name" />
+        </FormControl>
+
+        <FormControl>
+          <FormLabel>JSON Directory</FormLabel>
+          <Input type="text" value={jsonDirectory} onChange={(e) => setJsonDirectory(e.target.value)} placeholder="Enter JSON directory" />
+        </FormControl>
+
+        <Button colorScheme="blue" onClick={handleGenerate}>Generate Certificates</Button>
       </VStack>
     </Container>
   );

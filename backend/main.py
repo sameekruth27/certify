@@ -1,123 +1,125 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, File, UploadFile, Form
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from PIL import Image
-import pandas as pd
 import os
+import qrcode
+import pandas as pd
+from PIL import Image, ImageDraw, ImageFont
 import json
 
-# FastAPI instance
 app = FastAPI()
 
-# CORS configuration (adjust for production as needed)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Adjust this to your frontend URL
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+base_dir = os.path.dirname(os.path.abspath(__file__))
 
-# Endpoint for root - to check if server is up
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to the Certificate Generation API"}
+class CertificateData(BaseModel):
+    base_url: str
+    output_directory: str
+    code_serial: str
+    codes_start_number: int
+    json_file_name: str
+    json_directory: str
 
-# Model for the certificate details
-class CertificateResponse(BaseModel):
-    message: str
-    certificate_url: str
-
-# POST method to upload the CSV file and generate certificates
-@app.post("/generate/")
+@app.post("/api/generate-certificates")
 async def generate_certificates(
-    file: UploadFile = File(...),
-    certificate_template: UploadFile = File(...),
-    base_link: str = Form(...)
+    base_url: str = Form(...),
+    output_directory: str = Form(...),
+    code_serial: str = Form(...),
+    codes_start_number: int = Form(...),
+    json_file_name: str = Form(...),
+    json_directory: str = Form(...),
+    template: UploadFile = File(...),
+    excel: UploadFile = File(...),
 ):
+    # Define paths
+    template_path = os.path.join(base_dir, 'static', 'templates', template.filename)
+    excel_path = os.path.join(base_dir, 'static', 'data', excel.filename)
+    qr_path = os.path.join(base_dir, 'static', 'qr_code.png')
+    output_directory_path = os.path.join(base_dir, output_directory)
+    json_file_path = os.path.join(base_dir, json_directory, json_file_name)
+    
+    # Save uploaded files
     try:
-        # Check file type
-        if file.content_type != 'text/csv':
-            raise HTTPException(status_code=400, detail="Invalid file type. Please upload a CSV file.")
+        with open(template_path, "wb") as f:
+            f.write(await template.read())
+        
+        with open(excel_path, "wb") as f:
+            f.write(await excel.read())
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"message": f"Error saving uploaded files: {e}"})
 
-        # Save files locally
-        file_location = f"uploaded_files/{file.filename}"
-        with open(file_location, "wb+") as file_object:
-            file_object.write(file.file.read())
+    # Process certificates
+    try:
+        certificate_template = Image.open(template_path)
+        # Specify the engine for reading Excel files
+        try:
+            df = pd.read_excel(excel_path, engine='openpyxl')  # For .xlsx files
+        except ValueError:
+            try:
+                df = pd.read_excel(excel_path, engine='xlrd')  # For .xls files
+            except Exception as e:
+                return JSONResponse(status_code=400, content={"message": f"Error reading Excel file: {e}"})
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"message": f"Error processing files: {e}"})
 
-        template_location = f"uploaded_files/{certificate_template.filename}"
-        with open(template_location, "wb+") as file_object:
-            file_object.write(certificate_template.file.read())
+    os.makedirs(output_directory_path, exist_ok=True)
+    all_certificates_data = []
 
-        # Read the CSV file
-        df = pd.read_csv(file_location)
+    def generate_qr_code(data, qr_filename):
+        qr = qrcode.QRCode(
+            version=8,
+            error_correction=qrcode.constants.ERROR_CORRECT_H,
+            box_size=40,
+            border=0,
+        )
+        qr.add_data(data)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        img.save(qr_filename)
 
-        base_url = base_link
-        template_filename = template_location
-        output_directory = "static/generated_certificates/"
-        os.makedirs(output_directory, exist_ok=True)
-
-        certificate_template_img = Image.open(template_filename)
-        codes_start_number = 1000
-
-        all_certificates_data = []
-
-        for index, row in df.iterrows():
-            name = row['Name']
-            fname = name.title()
-            department = row['Department']
-            code = fname.lower().replace(" ", "").replace(".", "") + "CERT" + str(index + codes_start_number).zfill(4)
-
-            # QR code generation
-            qr_data = base_url + code
-            qr_filename = "static/qrcodes/" + f"{fname}_qr.png"
-            # Implement generate_qr_code function in your qr_code_generator module
-            generate_qr_code(qr_data, qr_filename)
-            qr_code = Image.open(qr_filename)
-
-            overlay_text = fname
-            output_filename = os.path.join(output_directory, f"{fname}.png")
-            # Implement overlay_qr_code function in your qr_code_generator module
-            overlay_qr_code(certificate_template_img.copy(), overlay_text, qr_code, output_filename)
-
-            certificate_data = {
-                "name": name,
-                "department": department,
-                "code": code,
-                "certificate_url": f"{base_url}{fname}.png"
-            }
-            all_certificates_data.append(certificate_data)
-
-        # Save all certificate data to a JSON file
-        with open('static/Data.json', 'w') as json_file:
+    def overlay_qr_code(certificate, text, qr_code, text_position, qr_position, output_filename):
+        draw = ImageDraw.Draw(certificate)
+        font_path = os.path.join(base_dir, 'static', 'fonts', 'baskervi.ttf')  # Path to the font
+        font = ImageFont.truetype(font_path, 90)
+        text_width = font.getlength(text)
+        text_x = text_position[0] - text_width // 2
+        text_y = text_position[1]
+        draw.text((text_x, text_y), text, fill="#4c0d82", font=font)
+        
+        qr_code = qr_code.resize((399, 399))
+        qr_alpha = qr_code.convert("RGBA").split()[3]
+        qr_overlay = Image.new("RGBA", certificate.size, (0, 0, 0, 0))
+        qr_overlay.paste(qr_code, qr_position, qr_alpha)
+        result = Image.alpha_composite(certificate.convert("RGBA"), qr_overlay)
+        result.save(output_filename)
+    
+    for index, row in df.iterrows():
+        name = row['Name']
+        fname = ' '.join(''.join((word[i].upper() if (i == 0 or (i < len(word) - 1 and word[i-1] == '.')) else char.lower()) for i, char in enumerate(word)) for word in name.split())
+        code = fname.lower().replace(" ", "").replace(".", "") + code_serial + str(index + codes_start_number).zfill(4)
+        qr_data = base_url + code
+        qr_filename = qr_path
+        generate_qr_code(qr_data, qr_filename)
+        qr_code = Image.open(qr_filename)
+        overlay_text = row["Holder"]
+        text_position = (1750, 1169)
+        qr_position = (1550, 1720)
+        output_filename = os.path.join(output_directory_path, f"{fname}.png")
+        overlay_qr_code(certificate_template.copy(), overlay_text, qr_code, text_position, qr_position, output_filename)
+        print(f"Certificate for {name} generated")
+        certificate_data = {
+            "code": code,
+            "holder": overlay_text,
+        }
+        all_certificates_data.append(certificate_data)
+    
+    try:
+        with open(json_file_path, 'w') as json_file:
             json.dump(all_certificates_data, json_file, indent=2)
-
-        return {"message": "Certificates generated successfully", "data": all_certificates_data}
-
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+        return JSONResponse(status_code=400, content={"message": f"Error saving JSON file: {e}"})
+    
+    return JSONResponse(content={"message": "Certificates generated successfully!"})
 
-# Endpoint to serve certificate information
-@app.get("/certificates/{certificate_code}", response_model=CertificateResponse)
-async def get_certificate(certificate_code: str):
-    try:
-        # Load certificate data from JSON
-        with open('static/Data.json') as json_file:
-            certificates = json.load(json_file)
-
-        # Find certificate by code
-        certificate = next((item for item in certificates if item["code"] == certificate_code), None)
-        if certificate:
-            return {
-                "message": "Certificate found",
-                "certificate_url": certificate["certificate_url"]
-            }
-        else:
-            raise HTTPException(status_code=404, detail="Certificate not found")
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving certificate: {str(e)}")
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+@app.get("/api/python")
+def hello_world():
+    return {"message": "Hello World"}
